@@ -6,13 +6,14 @@ import cv2
 import os
 from bipedal_ds import BipedalDataset
 import mlb
+import glob
 
-examples = [1]
-data_paths = ["./walker_new{}/".format(num) for num in examples]
+examples = [1, 201, 401, 601, 801, 1001, 1201]
+#data_paths = ["./walker_new{}/".format(num) for num in examples]
+data_paths = glob.glob('walker*')
 
 ds = BipedalDataset(data_paths)
-dataloader = DataLoader(ds, batch_size=2)
-ds[0][0].shape
+dataloader = DataLoader(ds, batch_size=1)
 
 
 im_height = 135
@@ -55,7 +56,7 @@ class VisualModel(nn.Module):
         self.bias = nn.Parameter(torch.empty(10).uniform_(-1,1)) # arbitrarily decided on the initialization
 
 
-    def forward(self, img, state_vec, weights=None, bias=None):
+    def forward(self, img, state_vec, weights=None):
         assert img.shape[1] == 3 # RGB. shape[0] should be batch dim i think
         if weights is None:
             img = F.relu(self.conv1(img))
@@ -71,17 +72,14 @@ class VisualModel(nn.Module):
             img_and_state = torch.tanh(self.fc4(img_and_state))
             return img_and_state
         else:
-            assert bias is not None
-#             def get_kwargs(named_params):
-#                 for name,param in named_params:
-#                     layer,field = name.split('.')
-            img = F.relu(F.conv1(img,weight=weights['conv1.weight'],bias=weights['conv1.bias'],stride=self.stride))
-            img = F.relu(F.conv2(img,weight=weights['conv2.weight'],bias=weights['conv2.bias'],stride=self.stride))
-            img = F.relu(F.conv3(img,weight=weights['conv3.weight'],bias=weights['conv3.bias'],stride=self.stride))
+            img = F.relu(F.conv2d(img,weight=weights['conv1.weight'],bias=weights['conv1.bias'],stride=self.stride))
+            img = F.relu(F.conv2d(img,weight=weights['conv2.weight'],bias=weights['conv2.bias'],stride=self.stride))
+            img = F.relu(F.conv2d(img,weight=weights['conv3.weight'],bias=weights['conv3.bias'],stride=self.stride))
             flat_img = img.view(img.shape[0],-1)
             #img = self.spatial_softmax(img) # parameterless so it's ok
-            bias = bias.unsqueeze(0).expand(state_vec.shape[0],bias.shape[0]) # uses bias not self.bias
-            img_and_state = torch.cat([flat_img, state_vec, bias],dim=1)  # notably using bias not self.bias
+            bias = weights['bias']
+            bias = bias.unsqueeze(0).expand(state_vec.shape[0],bias.shape[0])
+            img_and_state = torch.cat([flat_img, state_vec, bias],dim=1)
             img_and_state = F.relu(F.linear(img_and_state,weight=weights['fc1.weight'],bias=weights['fc1.bias']))
             img_and_state = F.relu(F.linear(img_and_state,weight=weights['fc2.weight'],bias=weights['fc2.bias']))
             img_and_state = F.relu(F.linear(img_and_state,weight=weights['fc3.weight'],bias=weights['fc3.bias']))
@@ -122,8 +120,7 @@ class EpochLog:
 
 
 
-def main():
-
+def main_nomaml():
     model = VisualModel()
     loss_fn = nn.MSELoss()
 
@@ -171,6 +168,65 @@ def main():
         optimizer.step()
 
         log.message(epoch, loss.item())
+
+
+def main():
+    model = VisualModel()
+    loss_fn = nn.MSELoss()
+
+    epochs = 1000
+    lr = 0.01
+    #lr = 0.001
+    meta_lr = 0.001
+    #K = 64
+    #test_K = 32
+    K = 30
+    test_K = 32
+
+    optimizer = torch.optim.Adam(model.parameters(), lr=meta_lr)
+    #optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+    log = EpochLog(8097, frequency=1, name='MAML Network Loss')
+
+
+    for epoch in range(epochs):
+        total_loss = 0
+
+        #for images, states, actions in dataloader:
+        for images, states, actions in ds:
+
+            # images: (T, H, W, 3)
+            # states: (T, 24)
+            # actions (T, 4)
+
+            assert images.shape[0] >= K + test_K and states.shape[0] >= K + test_K and actions.shape[0] >= K + test_K
+
+            indices = np.random.choice(range(images.shape[0]), K + test_K, replace=False)
+            images, states, actions = images[indices], states[indices], actions[indices]
+            #images, states, actions = images[indices].cuda(), states[indices].cuda(), actions[indices].cuda()
+
+            train_images, train_states, train_actions = images[:K], states[:K], actions[:K]
+
+            pred = model(train_images,train_states)
+            loss = loss_fn(train_actions, pred)
+
+            grads = torch.autograd.grad(loss, model.parameters(), create_graph=True)
+
+            weights = {name:(param - lr * grad) for (name,param), grad in zip(model.named_parameters(), grads)}
+
+            test_images, test_states, test_actions = images[K:K+test_K], states[K:K+test_K], actions[K:K+test_K]
+
+            pred = model(test_images, test_states, weights=weights)
+            loss = loss_fn(test_actions, pred)
+            total_loss += loss
+
+        total_loss = total_loss / len(ds)
+
+        optimizer.zero_grad()
+        total_loss.backward()
+        optimizer.step()
+
+        log.message(epoch, total_loss.item())
+
 
 
 #with mlb.debug():
