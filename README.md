@@ -2,6 +2,26 @@
 
 This is a repository for a 2019 project on imitation learning for Computation & the Brain at Columbia University. This work was done by Jenny Chen, Jacob Austin, and Matthew Bowers.
 
+## oneshot.py
+
+MAML implementation for imitation learning written from scratch, along with fine tuning based on One-Shot Visual Imitation Learning via Meta-Learning, Finn et al. Included a reproduction of the architecture used for visual inputs.
+
+## oneshot-nostate.py
+
+Same as oneshot.py but uses only visual input without direct access to the state information. 
+
+## bipedal\_ds.py
+
+Implementation of a dataset class for loading videos learned by our RL algorithm.
+
+## openai-gym.ipynb
+
+This is a modified version of a script running a DDPG model-free RL algorithm in the OpenAI Gym Bipedal Walker environment. Most of this code was taken from an online implementation.
+
+## vis.py 
+
+This is a visualization script for viewing the hidden layers and gradients of our MAML implementation. This allows us to view neurons that respond to particular inputs and are responsible for adaptation in the MAML step.
+
 ## k-armed-bandit.py
 
 `k-armed-bandit.py` compares the average reward for epsilon-greedy k-armed bandit algorithms over some number of iterations. These algorithms included the classic epsilon-greedy algorithm, the UCB algorithm, and the gradient bandits algorithm.

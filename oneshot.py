@@ -7,8 +7,9 @@ import os
 from bipedal_ds import BipedalDataset
 #import mlb
 import glob
+from vis import heat,gradheat
 
-examples = [201, 401, 601, 801, 1001, 1201]
+examples = [201, 401, 601, 801, 1001, 1201, 1601]
 data_paths = ["~/compbrain/imitation-learning/walker_new{}/".format(num) for num in examples]
 #data_paths = glob.glob('~/compbrain/imitation-learning/walker_new*')
 
@@ -128,47 +129,51 @@ def main_nomaml():
     #lr = 0.01
     lr = 0.001
     meta_lr = 0.001
-    K = 64
+    K = 30
     test_K = 32
+    interval = 100
+
 
     #optimizer = torch.optim.Adam(model.parameters(), lr=meta_lr)
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
-    log = EpochLog(8097, frequency=100, name='MAML Network Loss')
+    log = EpochLog(1234, frequency=1, name='MAML Network Loss')
 
-    images, states, actions = ds[0]
+    # images, states, actions = ds[0]
     for epoch in range(epochs):
         #total_loss = 0
 
         # images: (T, H, W, 3)
         # states: (T, 24)
         # actions (T, 4)
+        for images, states, actions in ds:
+            assert images.shape[0] >= K + test_K and states.shape[0] >= K + test_K and actions.shape[0] >= K + test_K
 
-        assert images.shape[0] >= K + test_K and states.shape[0] >= K + test_K and actions.shape[0] >= K + test_K
+            indices = np.random.choice(range(images.shape[0]), K + test_K, replace=False)
+            images, states, actions = images[indices], states[indices], actions[indices]
+            #images, states, actions = images[indices].cuda(), states[indices].cuda(), actions[indices].cuda()
 
-        indices = np.random.choice(range(images.shape[0]), K + test_K, replace=False)
-        images, states, actions = images[indices], states[indices], actions[indices]
-        #images, states, actions = images[indices].cuda(), states[indices].cuda(), actions[indices].cuda()
+            train_images, train_states, train_actions = images[:K], states[:K], actions[:K]
 
-        train_images, train_states, train_actions = images[:K], states[:K], actions[:K]
+            pred = model(train_images,train_states)
+            loss = loss_fn(train_actions, pred)
 
-        pred = model(train_images,train_states)
-        loss = loss_fn(train_actions, pred)
+            #grads = torch.autograd.grad(loss, model.parameters(), create_graph=True)
 
-        #grads = torch.autograd.grad(loss, model.parameters(), create_graph=True)
+            #weights = [param - lr * grad for param, grad in zip(model.parameters(), grads)]
 
-        #weights = [param - lr * grad for param, grad in zip(model.parameters(), grads)]
+            #test_images, test_states, test_labels = images[K:K+test_K], states[K:K+test_K], actions[K:K+test_K]
 
-        #test_images, test_states, test_labels = images[K:K+test_K], states[K:K+test_K], actions[K:K+test_K]
+            #pred = model(test_images, weights)
+            #loss = loss_fn(test_actions, pred)
 
-        #pred = model(test_images, weights)
-        #loss = loss_fn(test_actions, pred)
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
 
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
+            log.message(epoch, loss.item())
 
-        log.message(epoch, loss.item())
-
+            if epoch % interval == 0:
+                torch.save(model, "models/model-naive-all-{}.pth".format(epoch))
 
 def main():
     model = VisualModel().cuda()
@@ -215,6 +220,9 @@ def main():
             grads = torch.autograd.grad(loss, model.parameters(), create_graph=True)
 
             weights = {name:(param - lr * grad) for (name,param), grad in zip(model.named_parameters(), grads)}
+            if epoch % 50 == 49:
+                graphable = {name:{'weights':param,'grad':grad} for (name,param), grad in zip(model.named_parameters(), grads) if len(param.shape) <= 2}
+                breakpoint()
 
             test_images, test_states, test_actions = images[K:K+test_K], states[K:K+test_K], actions[K:K+test_K]
 
@@ -231,8 +239,55 @@ def main():
         log.message(epoch, total_loss.item())
         
         if epoch % interval == 0:
-            torch.save(model, "models/model-{}.pth".format(epoch))
+            torch.save(model, "models/fuckmodel-{}.pth".format(epoch))
+
+
+def fine_tune():
+    model = VisualModel().cuda()
+    loss_fn = nn.MSELoss()
+
+    epochs = 1000
+    lr = 0.01
+    #lr = 0.001
+    meta_lr = 0.001
+    #K = 64
+    #test_K = 32
+    K = 30
+    test_K = 32
+    interval = 100
+    steps = 20
+    
+    optimizer = torch.optim.Adam(model.parameters(), lr=meta_lr)
+    #optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+    log = EpochLog(1234, frequency=1, name='MAML Network Loss')
+
+    if not os.path.exists('models'):
+        os.mkdir('models')
+
+    model = torch.load('models/model-900.pth').cuda()
+
+    
+    images, states, actions = ds[-1]
+
+    assert images.shape[0] >= K + test_K and states.shape[0] >= K + test_K and actions.shape[0] >= K + test_K
+
+    for _ in range(steps):
+        indices = np.random.choice(range(images.shape[0]), K + test_K, replace=False)
+        #images, states, actions = images[indices], states[indices], actions[indices]
+        images, states, actions = images[indices].cuda(), states[indices].cuda(), actions[indices].cuda()
+
+        train_images, train_states, train_actions = images[:K], states[:K], actions[:K]
+
+        pred = model(train_images,train_states)
+        loss = loss_fn(train_actions, pred)
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+    
+    torch.save(model, "models/model-finetune-1601.pth")
 
 
 #with mlb.debug():
+# main_nomaml()
 main()
+# fine_tune()
