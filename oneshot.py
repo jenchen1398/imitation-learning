@@ -5,12 +5,12 @@ import numpy as np
 import cv2
 import os
 from bipedal_ds import BipedalDataset
-import mlb
+#import mlb
 import glob
 
-examples = [1, 201, 401, 601, 801, 1001, 1201]
-#data_paths = ["./walker_new{}/".format(num) for num in examples]
-data_paths = glob.glob('walker*')
+examples = [201, 401, 601, 801, 1001, 1201]
+data_paths = ["~/compbrain/imitation-learning/walker_new{}/".format(num) for num in examples]
+#data_paths = glob.glob('~/compbrain/imitation-learning/walker_new*')
 
 ds = BipedalDataset(data_paths)
 dataloader = DataLoader(ds, batch_size=1)
@@ -171,7 +171,7 @@ def main_nomaml():
 
 
 def main():
-    model = VisualModel()
+    model = VisualModel().cuda()
     loss_fn = nn.MSELoss()
 
     epochs = 1000
@@ -182,11 +182,14 @@ def main():
     #test_K = 32
     K = 30
     test_K = 32
+    interval = 100
 
     optimizer = torch.optim.Adam(model.parameters(), lr=meta_lr)
     #optimizer = torch.optim.Adam(model.parameters(), lr=lr)
-    log = EpochLog(8097, frequency=1, name='MAML Network Loss')
+    log = EpochLog(1234, frequency=1, name='MAML Network Loss')
 
+    if not os.path.exists('models'):
+        os.mkdir('models')
 
     for epoch in range(epochs):
         total_loss = 0
@@ -201,8 +204,8 @@ def main():
             assert images.shape[0] >= K + test_K and states.shape[0] >= K + test_K and actions.shape[0] >= K + test_K
 
             indices = np.random.choice(range(images.shape[0]), K + test_K, replace=False)
-            images, states, actions = images[indices], states[indices], actions[indices]
-            #images, states, actions = images[indices].cuda(), states[indices].cuda(), actions[indices].cuda()
+            #images, states, actions = images[indices], states[indices], actions[indices]
+            images, states, actions = images[indices].cuda(), states[indices].cuda(), actions[indices].cuda()
 
             train_images, train_states, train_actions = images[:K], states[:K], actions[:K]
 
@@ -226,12 +229,10 @@ def main():
         optimizer.step()
 
         log.message(epoch, total_loss.item())
-
+        
+        if epoch % interval == 0:
+            torch.save(model, "models/model-{}.pth".format(epoch))
 
 
 #with mlb.debug():
 main()
-
-
-
-
