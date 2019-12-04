@@ -12,7 +12,7 @@ class BipedalDataset(Dataset):
         return len(self.data_paths)
     
     def __getitem__(self, idx):
-        data_path = self.data_paths[idx]
+        data_path = os.path.expanduser(self.data_paths[idx])
         images = sorted([img for img in os.listdir(data_path) if img.endswith(".png")], key=lambda x: int(x[4:-4]))
         images = np.array([cv2.imread(os.path.join(data_path, img_path)) for img_path in images])
         images = np.transpose(images, (0, 3, 1, 2)).astype('float32')
